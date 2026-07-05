@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
@@ -24,10 +25,48 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from google import genai
+from google.genai import types
 
 DOCS_DIR = Path("./documents")
 DB_DIR = "./db"
+EMBEDDING_MODEL = "gemini-embedding-001"
+
+
+class GeminiEmbeddings(Embeddings):
+    """Embeddings backed by the Gemini API instead of a local model.
+
+    Using an API call instead of a local sentence-transformers model means
+    no torch/transformers dependency — those packages are large (1GB+) and
+    make cloud deployments slow to build or run out of memory on free-tier
+    hosting. This trades a small amount of latency per request for a much
+    lighter deployment footprint.
+    """
+
+    def __init__(self, api_key, model=EMBEDDING_MODEL, batch_size=100):
+        self.client = genai.Client(api_key=api_key)
+        self.model = model
+        self.batch_size = batch_size
+
+    def embed_documents(self, texts):
+        vectors = []
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i:i + self.batch_size]
+            response = self.client.models.embed_content(
+                model=self.model,
+                contents=batch,
+                config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+            )
+            vectors.extend([e.values for e in response.embeddings])
+        return vectors
+
+    def embed_query(self, text):
+        response = self.client.models.embed_content(
+            model=self.model,
+            contents=text,
+            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
+        )
+        return response.embeddings[0].values
 
 
 def load_excel(path):
@@ -201,15 +240,11 @@ def _clear_chroma_cache():
         pass  # older/newer chromadb versions may not have this method
 
 
-def build_vector_store(chunks):
-    """Embed chunks locally and persist them to Chroma."""
+def build_vector_store(chunks, api_key):
+    """Embed chunks via the Gemini API and persist them to Chroma."""
     _clear_chroma_cache()
 
-    # This model runs on your machine — no API calls, no data leaves your computer.
-    embeddings = HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-    )
+    embeddings = GeminiEmbeddings(api_key=api_key)
 
     vectordb = Chroma.from_documents(
         documents=chunks,
@@ -221,6 +256,12 @@ def build_vector_store(chunks):
 
 
 def main():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("Set your GEMINI_API_KEY environment variable (or put it in a .env file) before running.")
+        print("Get a free key at https://aistudio.google.com/apikey")
+        return
+
     print("Loading documents...")
     docs, failures = load_documents()
 
@@ -237,11 +278,13 @@ def main():
     chunks = chunk_documents(docs)
     print(f"Created {len(chunks)} chunks.")
 
-    print("\nEmbedding and storing in Chroma (this may take a minute the first time)...")
-    build_vector_store(chunks)
+    print("\nEmbedding via Gemini API and storing in Chroma...")
+    build_vector_store(chunks, api_key)
     print(f"\nDone. Vector store saved to {DB_DIR}/")
     print("You can now run: python chat.py")
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
     main()
