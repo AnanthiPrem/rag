@@ -92,8 +92,25 @@ with st.sidebar:
                         docs.extend(loaded)
 
                 chunks = ingest.chunk_documents(docs) if docs else []
+                embed_error = None
                 if docs:
-                    ingest.build_vector_store(chunks, api_key)
+                    try:
+                        ingest.build_vector_store(chunks, api_key)
+                    except Exception as e:
+                        embed_error = str(e)
+                        docs = []  # don't report success below
+
+            if embed_error:
+                if "429" in embed_error or "RESOURCE_EXHAUSTED" in embed_error:
+                    st.error(
+                        "Gemini's free tier rate limit was hit while embedding your "
+                        "documents (this app already retries automatically, but the "
+                        "limit was hit repeatedly). Wait a minute and try again with "
+                        "fewer/smaller files at a time, or check your quota at "
+                        "https://ai.dev/rate-limit."
+                    )
+                else:
+                    st.error(f"Failed to embed documents: {embed_error}")
 
             if failures:
                 st.error(f"{len(failures)} file(s) failed to process:")
