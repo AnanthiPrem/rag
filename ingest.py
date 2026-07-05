@@ -33,6 +33,10 @@ DB_DIR = "./db"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 
+import time
+from google.genai.errors import ClientError
+
+
 class GeminiEmbeddings(Embeddings):
     """Embeddings backed by the Gemini API instead of a local model.
 
@@ -41,31 +45,47 @@ class GeminiEmbeddings(Embeddings):
     make cloud deployments slow to build or run out of memory on free-tier
     hosting. This trades a small amount of latency per request for a much
     lighter deployment footprint.
+
+    The free tier has fairly tight per-minute rate limits, so calls here
+    retry with increasing delays on a 429 (rate limit / quota) error
+    instead of failing the whole upload immediately.
     """
 
-    def __init__(self, api_key, model=EMBEDDING_MODEL, batch_size=100):
+    def __init__(self, api_key, model=EMBEDDING_MODEL, batch_size=100, max_retries=5):
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.batch_size = batch_size
+        self.max_retries = max_retries
+
+    def _embed_with_retry(self, contents, task_type):
+        delay = 5  # seconds; doubles on each retry (5, 10, 20, 40, 80)
+        for attempt in range(self.max_retries):
+            try:
+                return self.client.models.embed_content(
+                    model=self.model,
+                    contents=contents,
+                    config=types.EmbedContentConfig(task_type=task_type),
+                )
+            except ClientError as e:
+                is_rate_limit = getattr(e, "code", None) == 429
+                if is_rate_limit and attempt < self.max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
 
     def embed_documents(self, texts):
         vectors = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i:i + self.batch_size]
-            response = self.client.models.embed_content(
-                model=self.model,
-                contents=batch,
-                config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
-            )
+            response = self._embed_with_retry(batch, "RETRIEVAL_DOCUMENT")
             vectors.extend([e.values for e in response.embeddings])
+            if i + self.batch_size < len(texts):
+                time.sleep(1)  # brief pause between batches to ease rate-limit pressure
         return vectors
 
     def embed_query(self, text):
-        response = self.client.models.embed_content(
-            model=self.model,
-            contents=text,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
-        )
+        response = self._embed_with_retry(text, "RETRIEVAL_QUERY")
         return response.embeddings[0].values
 
 
