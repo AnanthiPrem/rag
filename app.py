@@ -64,7 +64,9 @@ with st.sidebar:
     )
 
     if st.button("Process documents", use_container_width=True):
-        if not uploaded_files:
+        if not api_key:
+            st.warning("Enter your Gemini API key above first — it's needed to create embeddings now, not just to chat.")
+        elif not uploaded_files:
             st.warning("Upload at least one file first.")
         else:
             if upload_mode == "Replace existing documents":
@@ -79,7 +81,7 @@ with st.sidebar:
                     out.write(f.getbuffer())
                 saved_paths.append(dest)
 
-            with st.spinner("Loading, chunking, and embedding document(s)... (first run also downloads the embedding model)"):
+            with st.spinner("Loading, chunking, and embedding document(s) via Gemini..."):
                 docs = []
                 failures = []
                 for path in saved_paths:
@@ -91,7 +93,7 @@ with st.sidebar:
 
                 chunks = ingest.chunk_documents(docs) if docs else []
                 if docs:
-                    ingest.build_vector_store(chunks)
+                    ingest.build_vector_store(chunks, api_key)
 
             if failures:
                 st.error(f"{len(failures)} file(s) failed to process:")
@@ -132,10 +134,12 @@ with st.sidebar:
 
 # ---------------- Vector store (cached per session) ----------------
 def get_vectordb():
+    if not api_key:
+        return None
     if "vectordb" not in st.session_state:
         if not os.path.exists(chat.DB_DIR):
             return None
-        st.session_state.vectordb = chat.load_vector_store()
+        st.session_state.vectordb = chat.load_vector_store(api_key)
     return st.session_state.vectordb
 
 
@@ -151,7 +155,10 @@ for msg in st.session_state.messages:
 
 # ---------------- Chat input ----------------
 if vectordb is None:
-    st.info("Upload and process documents in the sidebar to get started.")
+    if not api_key:
+        st.info("Enter your Gemini API key in the sidebar to get started.")
+    else:
+        st.info("Upload and process documents in the sidebar to get started.")
 else:
     query = st.chat_input("Ask a question about your documents...")
     if query:
