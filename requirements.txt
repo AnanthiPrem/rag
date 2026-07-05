@@ -1,0 +1,14 @@
+langchain==0.2.16
+langchain-community==0.2.16
+langchain-text-splitters==0.2.4
+chromadb
+sentence-transformers==3.0.1
+pypdf==4.3.1
+python-docx==1.1.2
+openpyxl==3.1.5
+pandas==2.2.2
+google-genai
+python-dotenv==1.0.1
+docx2txt
+posthog
+streamlit
