@@ -12,12 +12,13 @@ Usage:
 import os
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from google import genai
+
+from ingest import GeminiEmbeddings, DB_DIR as INGEST_DB_DIR
 
 load_dotenv()
 
-DB_DIR = "./db"
+DB_DIR = INGEST_DB_DIR
 TOP_K = 4  # number of chunks to retrieve per question
 MODEL = "gemini-2.5-flash"  # free-tier eligible; swap for another Gemini model if needed
 
@@ -37,12 +38,9 @@ def _clear_chroma_cache():
         pass
 
 
-def load_vector_store():
+def load_vector_store(api_key):
     _clear_chroma_cache()
-    embeddings = HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-    )
+    embeddings = GeminiEmbeddings(api_key=api_key)
     return Chroma(persist_directory=DB_DIR, embedding_function=embeddings)
 
 
@@ -82,7 +80,7 @@ def main():
         return
 
     print("Loading vector store...")
-    vectordb = load_vector_store()
+    vectordb = load_vector_store(api_key)
     client = genai.Client(api_key=api_key)
 
     print("\nRAG chatbot ready. Ask a question about your documents (type 'exit' to quit).\n")
