@@ -1,0 +1,20 @@
+# Virtual environment (huge — never commit this; requirements.txt recreates it)
+venv/
+env/
+.venv/
+
+# Generated data — created at runtime, not source code
+db/
+documents/
+
+# Secrets — never commit your API key
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS/editor junk
+.DS_Store
+.vscode/
+.idea/
